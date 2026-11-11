@@ -1,0 +1,38 @@
+{
+  "system": "gateann",
+  "tier": "formal_1000000",
+  "bucket": "high",
+  "dataset": {
+    "base_size": 1000000,
+    "dimension": 192,
+    "metadata_columns": 200386,
+    "metadata_nnz": 10832801,
+    "workload_dir": "/home/miku/fvs-course-lab/datasets/yfcc_course_v1/formal_1000000/workloads/high",
+    "query_count": 200,
+    "ground_truth_k": 100
+  },
+  "command": [
+    "/home/miku/fvs-course-lab/systems/GateANN-public/build/tests/search_disk_index_yfcc",
+    "uint8",
+    "/home/miku/fvs-course-lab/course_runs/indices/gateann/formal_1000000/yfcc",
+    "1",
+    "8",
+    "/home/miku/fvs-course-lab/datasets/yfcc_course_v1/formal_1000000/workloads/high/query.u8bin",
+    "/home/miku/fvs-course-lab/datasets/yfcc_course_v1/formal_1000000/base.metadata.spmat",
+    "/home/miku/fvs-course-lab/datasets/yfcc_course_v1/formal_1000000/workloads/high/query.metadata.spmat",
+    "/home/miku/fvs-course-lab/datasets/yfcc_course_v1/formal_1000000/workloads/high/ground_truth.ids.ibin",
+    "10",
+    "l2",
+    "pq",
+    "8",
+    "0",
+    "0",
+    "32",
+    "320",
+    "640",
+    "1280"
+  ],
+  "exit_code": 0,
+  "elapsed_seconds": 1.7163620710000025,
+  "peak_rss_kb": 417852
+}

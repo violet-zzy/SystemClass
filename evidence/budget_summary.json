@@ -1,0 +1,101 @@
+[
+  {
+    "bucket": "high",
+    "L": 320,
+    "runs": 3,
+    "qps": 797.0,
+    "mean_latency_us": 1254.7051442910915,
+    "recall_percent": 93.2,
+    "mean_ios": 46.74,
+    "filter_skips": 280.25,
+    "peak_rss_kb": 417852.0
+  },
+  {
+    "bucket": "high",
+    "L": 640,
+    "runs": 3,
+    "qps": 493.0,
+    "mean_latency_us": 2028.3975659229209,
+    "recall_percent": 98.65,
+    "mean_ios": 88.93,
+    "filter_skips": 557.08,
+    "peak_rss_kb": 417852.0
+  },
+  {
+    "bucket": "high",
+    "L": 1280,
+    "runs": 3,
+    "qps": 263.0,
+    "mean_latency_us": 3802.2813688212927,
+    "recall_percent": 99.65,
+    "mean_ios": 171.32,
+    "filter_skips": 1113.68,
+    "peak_rss_kb": 417852.0
+  },
+  {
+    "bucket": "medium",
+    "L": 320,
+    "runs": 3,
+    "qps": 1150.0,
+    "mean_latency_us": 869.5652173913044,
+    "recall_percent": 72.05,
+    "mean_ios": 16.75,
+    "filter_skips": 309.36,
+    "peak_rss_kb": 417924.0
+  },
+  {
+    "bucket": "medium",
+    "L": 640,
+    "runs": 3,
+    "qps": 753.0,
+    "mean_latency_us": 1328.0212483399735,
+    "recall_percent": 87.1,
+    "mean_ios": 31.95,
+    "filter_skips": 613.73,
+    "peak_rss_kb": 417924.0
+  },
+  {
+    "bucket": "medium",
+    "L": 1280,
+    "runs": 3,
+    "qps": 411.0,
+    "mean_latency_us": 2433.0900243309,
+    "recall_percent": 95.39999999999999,
+    "mean_ios": 61.16,
+    "filter_skips": 1223.61,
+    "peak_rss_kb": 417924.0
+  },
+  {
+    "bucket": "low",
+    "L": 320,
+    "runs": 3,
+    "qps": 1195.0,
+    "mean_latency_us": 836.8200836820083,
+    "recall_percent": 34.300000000000004,
+    "mean_ios": 4.38,
+    "filter_skips": 320.7,
+    "peak_rss_kb": 417864.0
+  },
+  {
+    "bucket": "low",
+    "L": 640,
+    "runs": 3,
+    "qps": 889.0,
+    "mean_latency_us": 1124.859392575928,
+    "recall_percent": 51.800000000000004,
+    "mean_ios": 7.73,
+    "filter_skips": 637.0,
+    "peak_rss_kb": 417864.0
+  },
+  {
+    "bucket": "low",
+    "L": 1280,
+    "runs": 3,
+    "qps": 477.0,
+    "mean_latency_us": 2096.4360587002097,
+    "recall_percent": 70.05,
+    "mean_ios": 13.95,
+    "filter_skips": 1270.17,
+    "peak_rss_kb": 417864.0
+  }
+]

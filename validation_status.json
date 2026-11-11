@@ -1,0 +1,9 @@
+{
+  "host_cpp_policy_tests": "PASS: 500 bound cases, fallback, merge, stats, invalid input and sentinels",
+  "host_parser_validator_tests": "PASS: parsing, recall recomputation, sparse predicate and duplicates",
+  "patch_apply_check": "PASS against supplied source snapshot",
+  "linux_full_build": "PENDING",
+  "real_index_adaptive_test": "PENDING",
+  "baseline_budget_rows": 27,
+  "performance_claims": "No measured adaptive improvement claimed"
+}

@@ -1,0 +1,32 @@
+QueryLabels loaded: 200 queries
+[ssd_index.cpp:29:INFO] Use PQNeighbor as neighbor handler, metric: l2
+[ssd_index_defs.h:89:INFO] Loading metadata from disk index, sharded: 0
+[ssd_index_defs.h:72:INFO] Max npts: 1000000 Npoints: 1000000 Entry point: 859534 Data dim: 192 Range: 32
+[ssd_index_defs.h:74:INFO] Max node len: 324 Nnodes per sector: 12 Npts cur shard: 1000000 Label size: 0
+[ssd_index.h:97:INFO] Size per IO: 4096
+[ssd_index.h:103:INFO] Cur location: 1000008
+[ssd_index.h:108:INFO] Automatically set the update-related parameters.
+[utils.h:346:INFO] IndexBuildParameters with L: 64 R: 32 C: 384 alpha: 1.2 num_threads: 0 beam_width: 4 saturate_graph: 1
+[pq_nbr.h:86:INFO] PQ Pivots offset: 0 PQ Vectors offset: 0
+[pq_nbr.h:91:INFO] Load compressed vectors from file: /home/miku/fvs-course-lab/course_runs/indices/gateann/formal_1000000/yfcc_pq_compressed.bin offset: 0 num points: 1000000 n_chunks: 32
+[pq_table.h:125:INFO] Loaded PQ Pivots: #centroids: 256, #dims: 192, #chunks: 32
+[ssd_index.cpp:70:INFO] Init buffers for 1 threads, setup 2 buffers.
+[ssd_index.cpp:82:INFO] Setup 1 background I/O threads for insert...
+[ssd_index.cpp:216:INFO] /home/miku/fvs-course-lab/course_runs/indices/gateann/formal_1000000/yfcc_partition.bin.aligned does not exist, use equal partition mapping
+[ssd_index.cpp:229:INFO] Page layout loaded.
+[ssd_index.cpp:159:INFO] Loading tags from /home/miku/fvs-course-lab/course_runs/indices/gateann/formal_1000000/yfcc_disk.index.tags
+[ssd_index.cpp:239:INFO] Tags file not found. Using equal mapping
+[ssd_index.cpp:164:INFO] SSDIndex loaded successfully.
+[spmat_filter_store.h:43:INFO] SpmatFilterStore: loading nrow=1000000 ncol=200386 nnz=10832801
+[spmat_filter_store.h:95:INFO] SpmatFilterStore loaded: 1000000 nodes, 10832801 total labels, 49.0 MB
+[ssd_index.h:291:INFO] Loading FullAdjIndex from /home/miku/fvs-course-lab/course_runs/indices/gateann/formal_1000000/yfcc.full_adj.R32
+[full_adj_index.h:131:INFO] FullAdjIndex loaded via mmap (MAP_POPULATE): 1000000 nodes, 0.122935 GB
+
+=== GateANN(mode=8) [YFCC multi-label] ===
+     L         QPS   Recall@10     MeanIOs   FilterSkips       IO_us   Tunnel_us  Process_us
+------------------------------------------------------------------------------------------------
+   320        1168      0.3430        4.38        320.69          97         377         132
+   640         793      0.5180        7.73        637.00          17         804          36
+  1280         498      0.7005       13.95       1270.17          17        1320          45
+[ssd_index.cpp:34:INFO] Lock table size: 2
+[ssd_index.cpp:35:INFO] Page cache size: 0

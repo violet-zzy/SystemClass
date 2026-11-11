@@ -1,0 +1,347 @@
+--- a/include/ssd_index.h
++++ b/include/ssd_index.h
+@@ -175,7 +175,7 @@
+     size_t pipe_search(const T *query, const uint64_t k_search, const uint32_t mem_L, const uint64_t l_search,
+                        TagT *res_tags, float *res_dists, const uint64_t beam_width, QueryStats *stats = nullptr,
+                        AbstractSelector *selector = nullptr, const void *filter_data = nullptr,
+-                       const uint64_t relaxed_monotonicity_l = 0);
++                       const uint64_t relaxed_monotonicity_l = 0, uint64_t *exact_candidates = nullptr);
+ 
+     // Hot node cache for workload-aware search
+     void init_cache(size_t max_nodes) {
+--- /dev/null
++++ b/include/utils/adaptive_budget.h
+@@ -0,0 +1,123 @@
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++#include <limits>
++#include <stdexcept>
++#include <unordered_set>
++#include <utility>
++#include <vector>
++#include "utils/percentile_stats.h"
++
++namespace pipeann {
++
++// At most one restart. A fresh search recovers candidates pruned at the pilot L.
++// Candidate counts are a work proxy; the policy does not estimate/guarantee recall.
++struct AdaptiveBudgetConfig {
++  uint64_t max_l = 0;  // zero disables adaptation
++  uint64_t candidates_per_k = 4;
++  double skip_threshold = 0.85;
++};
++
++struct AdaptiveBudgetTrace {
++  uint64_t initial_l = 0, final_l = 0, sum_l = 0;
++  uint64_t pilot_exact = 0, final_exact = 0, exact_evaluations = 0;
++  uint64_t attempts = 1;
++  bool fallback = false;
++};
++
++inline uint64_t choose_fallback_l(uint64_t initial_l, uint64_t k,
++                                 uint64_t returned, uint64_t exact,
++                                 double skipped, const AdaptiveBudgetConfig &config) {
++  if (initial_l == 0 || k == 0 || initial_l < k)
++    throw std::invalid_argument("Require L >= K > 0");
++  if (config.candidates_per_k == 0 || !std::isfinite(config.skip_threshold) ||
++      config.skip_threshold < 0 || config.skip_threshold > 1 ||
++      !std::isfinite(skipped) || skipped < 0)
++    throw std::invalid_argument("Invalid adaptive budget parameters");
++  if (config.max_l <= initial_l) return initial_l;
++  const long double target = static_cast<long double>(k) * config.candidates_per_k;
++  const double ratio = skipped / std::max(1.0, skipped + static_cast<double>(exact));
++  const bool short_output = returned < k;
++  const bool sparse_work = static_cast<long double>(exact) < target &&
++                           ratio >= config.skip_threshold;
++  if (!short_output && !sparse_work) return initial_l;
++
++  // Geometric rounding avoids a separate run for every intermediate budget.
++  const long double wanted = std::max(2.0L * initial_l,
++      static_cast<long double>(initial_l) * target / std::max<uint64_t>(1, exact));
++  uint64_t next = initial_l;
++  while (next < config.max_l && static_cast<long double>(next) < wanted) {
++    next = next > config.max_l / 2 ? config.max_l : next * 2;
++  }
++  return next;
++}
++
++inline void add_query_stats(QueryStats &a, const QueryStats &b) {
++  a.total_us += b.total_us; a.n_4k += b.n_4k; a.n_8k += b.n_8k;
++  a.n_12k += b.n_12k; a.n_ios += b.n_ios; a.read_size += b.read_size;
++  a.io_us += b.io_us; a.io_us1 += b.io_us1; a.head_us += b.head_us;
++  a.cpu_us += b.cpu_us; a.cpu_us1 += b.cpu_us1; a.cpu_us2 += b.cpu_us2;
++  a.n_cmps_saved += b.n_cmps_saved; a.n_cmps += b.n_cmps;
++  a.n_cache_hits += b.n_cache_hits; a.n_hops += b.n_hops;
++  a.n_current_used += b.n_current_used; a.n_filter_skip += b.n_filter_skip;
++  a.bd_io_us += b.bd_io_us; a.bd_tunnel_us += b.bd_tunnel_us;
++  a.bd_process_us += b.bd_process_us;
++}
++
++// Search callback: size_t(L, ids, exact_distances, QueryStats*, uint64_t *exact_count).
++// Both attempts use identical query/filter/index. Costs include both searches.
++template<class Search>
++AdaptiveBudgetTrace adaptive_budget_search(uint64_t initial_l, uint64_t k,
++    uint32_t *output, QueryStats &stats, const AdaptiveBudgetConfig &config, Search search) {
++  choose_fallback_l(initial_l, k, k, k, 0, config);  // validate before allocating/calling search
++  std::vector<uint32_t> ids(k, std::numeric_limits<uint32_t>::max());
++  std::vector<float> dists(k, std::numeric_limits<float>::infinity());
++  std::vector<std::pair<float, uint32_t>> candidates;
++  candidates.reserve(k * 2);
++  stats = QueryStats{};
++  AdaptiveBudgetTrace trace;
++  trace.initial_l = trace.final_l = trace.sum_l = initial_l;
++
++  auto attempt = [&](uint64_t l) -> std::pair<uint64_t, uint64_t> {
++    QueryStats current{};
++    uint64_t exact = 0;
++    const uint64_t returned = search(l, ids.data(), dists.data(), &current, &exact);
++    if (returned > k) throw std::runtime_error("Search returned more than K results");
++    for (uint64_t j = 0; j < returned; ++j) {
++      if (!std::isfinite(dists[j]) || ids[j] == std::numeric_limits<uint32_t>::max())
++        throw std::runtime_error("Invalid exact-distance search result");
++      candidates.emplace_back(dists[j], ids[j]);
++    }
++    add_query_stats(stats, current);
++    trace.exact_evaluations += exact;  // includes repeated evaluations across attempts
++    return {returned, exact};
++  };
++
++  auto pilot = attempt(initial_l);
++  trace.pilot_exact = trace.final_exact = pilot.second;
++  const uint64_t next = choose_fallback_l(initial_l, k, pilot.first, pilot.second,
++                                         stats.n_filter_skip, config);
++  if (next > initial_l) {
++    trace.fallback = true;
++    trace.attempts = 2;
++    trace.final_l = next;
++    trace.sum_l += next;
++    auto final = attempt(next);
++    trace.final_exact = final.second;
++  }
++
++  // Keep the best exact-distance top-K from both attempts; never append duplicates.
++  std::sort(candidates.begin(), candidates.end());
++  std::unordered_set<uint32_t> seen;
++  std::fill(output, output + k, std::numeric_limits<uint32_t>::max());
++  uint64_t count = 0;
++  for (const auto &entry : candidates) {
++    if (!seen.insert(entry.second).second) continue;
++    output[count++] = entry.second;
++    if (count == k) break;
++  }
++  return trace;
++}
++}  // namespace pipeann
+--- a/src/search/pipe_search.cpp
++++ b/src/search/pipe_search.cpp
+@@ -42,7 +42,8 @@
+   size_t SSDIndex<T, TagT>::pipe_search(const T *query1, const uint64_t k_search, const uint32_t mem_L,
+                                         const uint64_t l_search, TagT *res_tags, float *distances,
+                                         const uint64_t beam_width, QueryStats *stats, AbstractSelector *selector,
+-                                        const void *filter_data, const uint64_t relaxed_monotonicity_l) {
++                                        const void *filter_data, const uint64_t relaxed_monotonicity_l,
++                                        uint64_t *exact_candidates) {
+     QueryBuffer<T> *query_buf = pop_query_buf(query1);
+ #ifdef USE_AIO
+     void *ctx = reader->get_ctx();
+@@ -538,6 +539,9 @@
+     std::sort(full_retset.begin(), full_retset.end(),
+               [](const Neighbor &left, const Neighbor &right) { return left < right; });
+ 
++    // Optional diagnostic counts exact-distance candidate entries, not returned top-K.
++    if (exact_candidates != nullptr) *exact_candidates = full_retset.size();
++
+     // copy k_search values
+     uint64_t t = 0;
+     for (uint64_t i = 0; i < full_retset.size() && t < k_search; i++) {
+--- /dev/null
++++ b/tests/adaptive_budget_test.cpp
+@@ -0,0 +1,54 @@
++#include <cassert>
++#include <iostream>
++#include "utils/adaptive_budget.h"
++
++int main() {
++  using namespace pipeann;
++  AdaptiveBudgetConfig c; c.max_l = 1280;
++  assert(choose_fallback_l(320, 10, 10, 47, 280, c) == 320);
++  assert(choose_fallback_l(320, 10, 10, 16, 309, c) == 1280);
++  assert(choose_fallback_l(320, 10, 4, 4, 320, c) == 1280);
++  assert(choose_fallback_l(320, 10, 10, 30, 300, c) == 640);
++  assert(choose_fallback_l(320, 10, 10, 16, 1, c) == 320);
++  c.max_l = 320;
++  assert(choose_fallback_l(320, 10, 0, 0, 0, c) == 320);
++  c.max_l = 1000;
++  assert(choose_fallback_l(320, 10, 0, 0, 300, c) == 1000);
++  for (uint64_t exact = 0; exact < 100; ++exact) {
++    for (uint64_t maximum : {321ULL, 640ULL, 1000ULL, 1280ULL, 5120ULL}) {
++      c.max_l = maximum;
++      auto l = choose_fallback_l(320, 10, std::min<uint64_t>(exact, 10), exact, 320, c);
++      assert(l >= 320 && l <= maximum);
++    }
++  }
++  c.max_l = 1280;
++  c.candidates_per_k = 4;
++  uint32_t output[3]; QueryStats stats;
++  unsigned calls = 0;
++  auto trace = adaptive_budget_search(320, 3, output, stats, c,
++      [&](uint64_t l, uint32_t *ids, float *d, QueryStats *s, uint64_t *exact) -> size_t {
++        ++calls; s->n_ios = 5; s->n_filter_skip = 100; s->bd_io_us = 7;
++        if (l == 320) { ids[0]=10; d[0]=1; ids[1]=20; d[1]=3; *exact=2; return 2; }
++        ids[0]=10; d[0]=1; ids[1]=30; d[1]=2; ids[2]=40; d[2]=4;
++        *exact=6; return 3;
++      });
++  assert(calls == 2 && trace.fallback && trace.attempts == 2);
++  assert(trace.sum_l == 1600 && trace.final_l == 1280);
++  assert(trace.exact_evaluations == 8 && trace.pilot_exact == 2);
++  assert(output[0] == 10 && output[1] == 30 && output[2] == 20);
++  assert(stats.n_ios == 10 && stats.n_filter_skip == 200 && stats.bd_io_us == 14);
++  calls = 0;
++  c.max_l = 320;
++  trace = adaptive_budget_search(320, 3, output, stats, c,
++      [&](uint64_t, uint32_t *ids, float *d, QueryStats*, uint64_t *exact) -> size_t {
++        ++calls; ids[0]=5; d[0]=1; *exact=1; return 1;
++      });
++  assert(calls == 1 && !trace.fallback && trace.sum_l == 320);
++  assert(output[0] == 5 && output[1] == UINT32_MAX && output[2] == UINT32_MAX);
++  bool rejected = false;
++  c.skip_threshold = std::numeric_limits<double>::quiet_NaN();
++  try { choose_fallback_l(320, 10, 10, 10, 300, c); }
++  catch (const std::invalid_argument&) { rejected = true; }
++  assert(rejected);
++  std::cout << "PASS adaptive policy: 500 bounded cases, restart, merge, stats, sentinels, invalid inputs\n";
++}
+--- a/tests/search_disk_index_yfcc.cpp
++++ b/tests/search_disk_index_yfcc.cpp
+@@ -16,6 +16,9 @@
+ // =============================================================================
+ 
+ #include <omp.h>
++#include <cstdlib>
++#include <limits>
++#include "utils/adaptive_budget.h"
+ #include <iomanip>
+ #include <fstream>
+ #include <string>
+@@ -157,6 +160,40 @@
+   }
+   if (Lvec.empty()) { std::cerr << "No valid L values\n"; return -1; }
+ 
++  // Opt-in environment controls preserve the course adapter's positional interface.
++  pipeann::AdaptiveBudgetConfig adaptive_config;
++  auto env_u64 = [](const char *name, uint64_t fallback) -> uint64_t {
++    const char *value = std::getenv(name);
++    if (!value) return fallback;
++    std::string text(value);
++    if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos)
++      throw std::invalid_argument(std::string("Invalid ") + name);
++    return std::stoull(text);
++  };
++  adaptive_config.max_l = env_u64("GATEANN_ADAPTIVE_MAX_L", 0);
++  adaptive_config.candidates_per_k = env_u64("GATEANN_ADAPTIVE_CANDIDATES_PER_K", 4);
++  if (const char *value = std::getenv("GATEANN_ADAPTIVE_SKIP_THRESHOLD")) {
++    size_t used = 0;
++    std::string text(value);
++    adaptive_config.skip_threshold = std::stod(text, &used);
++    if (used != text.size()) throw std::invalid_argument("Invalid adaptive skip threshold");
++  }
++  if (adaptive_config.max_l > 0) {
++    if (search_mode != FILTER_AWARE_PIPE_SEARCH)
++      throw std::invalid_argument("Adaptive search requires mode=8");
++    // Enforce safe arithmetic and a bounded allocation range.
++    if (adaptive_config.max_l > 1000000 || adaptive_config.candidates_per_k > 1000000)
++      throw std::invalid_argument("Adaptive limits exceed supported range");
++    for (uint64_t l : Lvec) {
++      if (l > adaptive_config.max_l)
++        throw std::invalid_argument("Adaptive max L must cover initial L");
++      pipeann::choose_fallback_l(l, recall_at, recall_at, recall_at, 0, adaptive_config);
++    }
++    std::cout << "ADAPTIVE_CONFIG,max_l=" << adaptive_config.max_l
++              << ",candidates_per_k=" << adaptive_config.candidates_per_k
++              << ",skip_threshold=" << adaptive_config.skip_threshold << std::endl;
++  }
++
+   // Load data
+   T *query = nullptr;
+   size_t query_num, query_dim;
+@@ -217,8 +254,9 @@
+ 
+   // Result buffers
+   std::vector<std::vector<uint32_t>> results(
+-      Lvec.size(), std::vector<uint32_t>(query_num * recall_at, 0));
++      Lvec.size(), std::vector<uint32_t>(query_num * recall_at, std::numeric_limits<uint32_t>::max()));
+   std::vector<pipeann::QueryStats> stats(query_num);
++  std::vector<pipeann::AdaptiveBudgetTrace> adaptive_traces(query_num);
+ 
+   bool is_fa = (search_mode == FILTER_AWARE_PIPE_SEARCH);
+   std::string mode_name = is_fa ? "GateANN(mode=8)" : "PipeANN(mode=2)";
+@@ -243,7 +281,18 @@
+ #pragma omp parallel for schedule(dynamic, 1)
+     for (int64_t i = 0; i < (int64_t)query_num; i++) {
+       const void *ql = query_labels.get(i);
+-      if (is_fa) {
++      if (is_fa && adaptive_config.max_l > 0) {
++        const auto query_start = std::chrono::steady_clock::now();
++        adaptive_traces[i] = pipeann::adaptive_budget_search(
++            L, recall_at, res_buf.data() + i * recall_at, stats[i], adaptive_config,
++            [&](uint64_t budget, uint32_t *ids, float *dists,
++                pipeann::QueryStats *current, uint64_t *exact) -> size_t {
++              return idx_->pipe_search(query + i * query_dim, recall_at, mem_L, budget,
++                                      ids, dists, beamwidth, current, nullptr, ql, 0, exact);
++            });
++        stats[i].total_us = std::chrono::duration<double, std::micro>(
++            std::chrono::steady_clock::now() - query_start).count();
++      } else if (is_fa) {
+         // mode=8: pre-IO filter + tunneling
+         idx_->pipe_search(query + i * query_dim, recall_at, mem_L, L,
+                           res_buf.data() + i * recall_at,
+@@ -288,6 +337,46 @@
+               << std::setw(12) << std::fixed << std::setprecision(0) << mean_bd_tunnel
+               << std::setw(12) << std::fixed << std::setprecision(0) << mean_bd_process
+               << std::endl;
++
++    // Full query latency includes pilot, restart and merge; RSS comes from the runner.
++    if (adaptive_config.max_l > 0) {
++      uint64_t fallbacks = 0, final_l_sum = 0, sum_l = 0, pilot_exact = 0, exact = 0;
++      for (const auto &trace : adaptive_traces) {
++        fallbacks += trace.fallback;
++        final_l_sum += trace.final_l;
++        sum_l += trace.sum_l;
++        pilot_exact += trace.pilot_exact;
++        exact += trace.exact_evaluations;
++      }
++      std::cout << std::fixed << std::setprecision(6)
++                << "ADAPTIVE_METRICS,L=" << L << ",queries=" << query_num
++                << ",fallback_queries=" << fallbacks
++                << ",fallback_fraction=" << double(fallbacks) / query_num
++                << ",mean_final_l=" << double(final_l_sum) / query_num
++                << ",mean_sum_l=" << double(sum_l) / query_num
++                << ",mean_pilot_exact=" << double(pilot_exact) / query_num
++                << ",mean_exact_evaluations=" << double(exact) / query_num << std::endl;
++    }
++    if (const char *path = std::getenv("GATEANN_QUERY_CSV")) {
++      // Use one L per process when a path is supplied.
++      if (Lvec.size() != 1) throw std::invalid_argument("Query CSV requires a single L");
++      std::ofstream detail(path);
++      if (!detail) throw std::runtime_error("Cannot write query CSV");
++      detail << "query,L,latency_us,ios,filter_skips,fallback,final_l,sum_l,pilot_exact,exact_evaluations,ids\n";
++      for (size_t i = 0; i < query_num; ++i) {
++        const auto &trace = adaptive_traces[i];
++        detail << i << ',' << L << ',' << stats[i].total_us << ',' << stats[i].n_ios
++               << ',' << stats[i].n_filter_skip << ',' << trace.fallback
++               << ',' << (adaptive_config.max_l ? trace.final_l : L)
++               << ',' << (adaptive_config.max_l ? trace.sum_l : L)
++               << ',' << trace.pilot_exact << ',' << trace.exact_evaluations << ',';
++        for (uint64_t j = 0; j < recall_at; ++j) {
++          if (j) detail << ';';
++          detail << res_buf[i * recall_at + j];
++        }
++        detail << '\n';
++      }
++    }
+   }
+ 
+   delete[] query;

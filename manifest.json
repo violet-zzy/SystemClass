@@ -1,0 +1,22 @@
+{
+  "include/ssd_index.h": {
+    "before_sha256": "27efa9acb91b312b120972706f27074dac928e04de83ab4b6f24f00c7a96d8c4",
+    "after_sha256": "117ed49cbcc7431bf0e97eb3e7d8a20aba8e3c85ee28fda9fbc3af926ad645fc"
+  },
+  "include/utils/adaptive_budget.h": {
+    "before_sha256": null,
+    "after_sha256": "9efae0aeb5c30b61fad3a9156f72235f355e6b0b6b5728838fe354284bcb9483"
+  },
+  "src/search/pipe_search.cpp": {
+    "before_sha256": "8880a15a8beb6c405e43da4047977c04833f4e8184e10fe60f59206bb32c7185",
+    "after_sha256": "ad1105f7e0cb006ae73fca01cc355948f010f21a84ebbd9e3d63814900e2943d"
+  },
+  "tests/adaptive_budget_test.cpp": {
+    "before_sha256": null,
+    "after_sha256": "eed385660010c2c5b93a86773b40688e3814ecac812bcae9ffeccb4d0b1889d8"
+  },
+  "tests/search_disk_index_yfcc.cpp": {
+    "before_sha256": "37ad5939b62749e2e48ed4c1fa944e94b1bf43edeed65782e29a26293207600d",
+    "after_sha256": "fc3d6803e315693296c65a5d0173956b60255d4c9783baa33e6cdfb53b5de0f5"
+  }
+}
